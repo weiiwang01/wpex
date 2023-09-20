@@ -186,6 +186,6 @@ func MakeWireguardAnalyzer(publicKeys [][]byte) WireguardAnalyzer {
 	return WireguardAnalyzer{
 		table:      exchange.MakeExchangeTable(),
 		publicKeys: publicKeys,
-		filter:     bloom.MakeFilter(8*1024*1024, 5, salt),
+		filter:     bloom.MakeFilter(32*1024*1024, 10, salt),
 	}
 }

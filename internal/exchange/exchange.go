@@ -41,7 +41,7 @@ func (t *ExchangeTable) AddPeerAddr(index uint32, addr net.UDPAddr) error {
 
 	t.table[index] = peerInfo{
 		addr: addr,
-		ttl:  time.Now().Add(4 * time.Minute),
+		ttl:  time.Now().Add(10 * time.Second),
 	}
 
 	slog.Debug("exchange table updated", "entries", len(t.table))
@@ -113,13 +113,16 @@ func (t *ExchangeTable) LinkPeers(sender, receiver uint32) error {
 		return fmt.Errorf("failed to link peers: unknown receiver %d", receiver)
 	}
 
+	ttl := time.Now().Add(time.Duration(4) * time.Minute)
+
 	s.established = true
 	s.counterpart = receiver
+	s.ttl = ttl
 	t.table[sender] = s
 
 	r.established = true
 	r.counterpart = sender
-	r.ttl = s.ttl
+	r.ttl = ttl
 	t.table[receiver] = r
 
 	return nil
@@ -132,7 +135,7 @@ func (t *ExchangeTable) GetPeerCounterpart(index uint32) (uint32, error) {
 
 	peer, ok := t.table[index]
 	if !ok || !peer.established {
-		return 0, fmt.Errorf("peer %d has no counterpart", index)
+		return 0, fmt.Errorf("peer %d doesn't exist or has no counterpart", index)
 	}
 
 	return peer.counterpart, nil
