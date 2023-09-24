@@ -34,13 +34,13 @@ func mapAddrs(as []net.UDPAddr) []string {
 func TestWireguardAnalyzer_VerifyMac1(t *testing.T) {
 	analyzer := MakeWireguardAnalyzer([][]byte{pubkeyA, pubkeyB})
 	addr1, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51820")
-	_, err := analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
-	if err != nil {
-		t.Errorf("mac1 verification failed: %v", err)
+	addrs, _ := analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
+	if addrs == nil {
+		t.Error("mac1 verification failed")
 	}
 	analyzer = MakeWireguardAnalyzer([][]byte{fakePubkey})
-	_, err = analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
-	if err == nil {
+	addrs, _ = analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
+	if addrs != nil {
 		t.Errorf("mac1 verification didn't fail")
 	}
 }
@@ -52,9 +52,9 @@ func TestWireguardAnalyzer_Handshake(t *testing.T) {
 	addrB, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51821")
 	addrC, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51822")
 
-	forward, err := analyzer.Analyse(handshakeInitiationSession1AtoB, *addrA)
-	if err != nil {
-		t.Errorf("Analysing handshake initiation failed: %v", err)
+	forward, data := analyzer.Analyse(handshakeInitiationSession1AtoB, *addrA)
+	if data == nil {
+		t.Error("Analysing handshake initiation failed")
 	}
 	var expected []string
 	if !slices.Equal(mapAddrs(forward), expected) {
@@ -62,45 +62,45 @@ func TestWireguardAnalyzer_Handshake(t *testing.T) {
 	}
 
 	expected = []string{addrA.String()}
-	forward, err = analyzer.Analyse(handshakeInitiationSession2AtoB, *addrB)
-	if err != nil {
-		t.Errorf("Analysing handshake initiation failed: %v", err)
+	forward, data = analyzer.Analyse(handshakeInitiationSession2AtoB, *addrB)
+	if data == nil {
+		t.Error("Analysing handshake initiation failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing handshake initiation return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
 	}
 
 	expected = []string{addrA.String(), addrB.String()}
-	forward, err = analyzer.Analyse(handshakeInitiationCtoD, *addrC)
-	if err != nil {
-		t.Errorf("Analysing handshake initiation failed: %v", err)
+	forward, data = analyzer.Analyse(handshakeInitiationCtoD, *addrC)
+	if data == nil {
+		t.Errorf("Analysing handshake initiation failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing handshake initiation return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
 	}
 
 	expected = []string{addrA.String()}
-	forward, err = analyzer.Analyse(handshakeResponseSession1BtoA, *addrB)
-	if err != nil {
-		t.Errorf("Analysing handshake response failed: %v", err)
+	forward, data = analyzer.Analyse(handshakeResponseSession1BtoA, *addrB)
+	if data == nil {
+		t.Errorf("Analysing handshake response failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing handshake response return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
 	}
 
 	expected = []string{addrB.String()}
-	forward, err = analyzer.Analyse(transportDataSession1AtoB1, *addrA)
-	if err != nil {
-		t.Errorf("Analysing transport data failed: %v", err)
+	forward, data = analyzer.Analyse(transportDataSession1AtoB1, *addrA)
+	if data == nil {
+		t.Errorf("Analysing handshake response failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing transport data return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
 	}
 
 	expected = []string{addrA.String()}
-	forward, err = analyzer.Analyse(transportDataSession1BtoA1, *addrB)
-	if err != nil {
-		t.Errorf("Analysing transport data failed: %v", err)
+	forward, data = analyzer.Analyse(transportDataSession1BtoA1, *addrB)
+	if data == nil {
+		t.Errorf("Analysing handshake response failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing transport data return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
@@ -114,26 +114,26 @@ func TestWireguardAnalyzer_Roaming(t *testing.T) {
 	addrB, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51821")
 	addrA2, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51822")
 
-	if _, err := analyzer.Analyse(handshakeInitiationSession1AtoB, *addrA); err != nil {
-		t.Errorf("Analysing handshake initiation failed: %v", err)
+	if _, data := analyzer.Analyse(handshakeInitiationSession1AtoB, *addrA); data == nil {
+		t.Error("Analysing handshake initiation failed")
 	}
-	if _, err := analyzer.Analyse(handshakeResponseSession1BtoA, *addrB); err != nil {
-		t.Errorf("Analysing handshake initiation failed: %v", err)
+	if _, data := analyzer.Analyse(handshakeResponseSession1BtoA, *addrB); data == nil {
+		t.Error("Analysing handshake initiation failed")
 	}
 
 	expected := []string{addrB.String()}
-	forward, err := analyzer.Analyse(transportDataSession1AtoB1, *addrA2)
-	if err != nil {
-		t.Errorf("Analysing transport data failed: %v", err)
+	forward, data := analyzer.Analyse(transportDataSession1AtoB1, *addrA2)
+	if data == nil {
+		t.Errorf("Analysing handshake response failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing transport data return incorrect forward addresses: expected %s, got %s", expected, mapAddrs(forward))
 	}
 
 	expected = []string{addrA2.String()}
-	forward, err = analyzer.Analyse(transportDataSession1BtoA1, *addrB)
-	if err != nil {
-		t.Errorf("Analysing transport data failed: %v", err)
+	forward, data = analyzer.Analyse(transportDataSession1BtoA1, *addrB)
+	if data == nil {
+		t.Errorf("Analysing handshake response failed")
 	}
 	if !slices.Equal(mapAddrs(forward), expected) {
 		t.Errorf("Analysing transport data return incorrect forward addresses after roaming: expected %s, got %s", expected, mapAddrs(forward))

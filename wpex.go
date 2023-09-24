@@ -5,11 +5,14 @@ import (
 	"flag"
 	"fmt"
 	"github.com/weiiwang01/wpex/internal/relay"
+	"log"
 	"log/slog"
 	"net"
 	"os"
 	"strings"
 )
+
+var version string
 
 type pubKeys []string
 
@@ -24,12 +27,32 @@ func (ks *pubKeys) Set(s string) error {
 
 func main() {
 	bind := flag.String("bind", "", "address to bind to")
-	port := flag.Uint("port", 40000, "port number to listen on")
+	port := flag.Uint("port", 40000, "port number to listen")
 	debug := flag.Bool("debug", false, "enable debug messages")
 	trace := flag.Bool("trace", false, "enable trace level debug messages")
+	peersFlag := flag.Uint("peers", 0, "number of wireguard peers for handshake and broadcast rate limit estimation")
+	pairsFlag := flag.Uint("pairs", 0, "number of wireguard peer-to-peer connections for handshake and broadcast rate limit estimation")
+	versionFlag := flag.Bool("version", false, "show version number and quit")
 	var allows pubKeys
-	flag.Var(&allows, "allow", "allowed wireguard public keys")
+	flag.Var(&allows, "allow", "allow a wireguard public key. --allow can be used multiple times for allowing multiple public keys")
 	flag.Parse()
+	if *versionFlag {
+		fmt.Println("wpex", version)
+		os.Exit(0)
+	}
+	peers := int(*peersFlag)
+	if peers == 0 {
+		if len(allows) > 0 {
+			peers = len(allows)
+		} else {
+			log.Fatal("--peers or --allow is required for estimating the handshake and broadcast rate limit")
+		}
+	}
+	pairs := int(*pairsFlag)
+	if pairs == 0 {
+		log.Fatal("--pairs is required for estimating the broadcast rate limit")
+	}
+	pairs = min(pairs, peers*(peers-1))
 	loggingLevel := new(slog.LevelVar)
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: loggingLevel}))
 	if *debug {
@@ -58,5 +81,5 @@ func main() {
 		panic(fmt.Sprintf("failed to listen on UDP: %s", err))
 	}
 	logger.Info("server listening", "addr", address)
-	relay.Start(conn, allowKeys)
+	relay.Start(conn, allowKeys, peers, pairs)
 }

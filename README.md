@@ -1,7 +1,7 @@
 # wpex: WireGuard Packet Relay
 
 `wpex` is a relay server designed for WireGuard, facilitating NAT traversal
-without compromising the E2E encryption of WireGuard.
+without compromising the end-to-end encryption of WireGuard.
 
 ## Features
 
@@ -16,8 +16,13 @@ without compromising the E2E encryption of WireGuard.
 Fetch and run the `wpex` Docker image with:
 
 ```bash
-docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest
+docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest --peers 3 --pairs 2
 ```
+
+Where `--peers` is the number of WireGuard peers connecting to the server,
+and `--pairs` is the number of WireGuard peer-to-peer pairs formed from all
+pairs. Those configurations are used to estimate broadcast rate limit for
+amplification attack mitigation.
 
 ### Using Pre-built Binaries:
 
@@ -39,7 +44,7 @@ If you wish to connect multiple WireGuard peers behind NAT via a `wpex` server
 
 1. Update all WireGuard peers' endpoint configurations to point to the `wpex`
    server.
-2. Enable the `PersistentKeepalive` setting.
+2. Enable the `PersistentKeepalive` setting, if the peer is behind a NAT.
 
 **Example for Peer A**:
 
@@ -80,15 +85,18 @@ the `wpex` server. Connections attempted with public keys not on this list will
 be ignored. This doesn't affect the integrity of the E2E encryption, as only the
 public keys (not the associated private keys) are known to the wpex server.
 
+`--peers` can be omitted as it will be set to the number of allowed public keys.
+
 Examples:
 
 ```bash
-docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest \
+docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest --pairs 1 \
   --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
   --allow BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
 ```
 
 ```bash
-wpex --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+wpex --pairs 1 \
+  --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
   --allow BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
 ```

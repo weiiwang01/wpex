@@ -61,9 +61,14 @@ jobs:
           username: ${{ github.repository_owner }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Get Version
+        id: version
+        run: echo version=${GITHUB_REF##*v} >> $GITHUB_OUTPUT
+
       - name: Build and push
         uses: docker/build-push-action@v4
         with:
+          build-args: WPEX_VERSION=${{ steps.version.outputs.version }}
           platforms: linux/amd64,linux/arm64
           push: true
           tags: ${{ steps.meta.outputs.tags }}
@@ -89,12 +94,16 @@ jobs:
         with:
           go-version: '1.21'
 
-      - name: Build wpex
-        run: CGO_ENABLED=0 GOOS=${{ matrix.GOOS }} GOARCH=${{ matrix.GOARCH }} go build -ldflags="-w -s" -o wpex
-
       - name: Get Version
         id: version
         run: echo version=${GITHUB_REF##*v} >> $GITHUB_OUTPUT
+
+      - name: Build wpex
+        run: >-
+          CGO_ENABLED=0 
+          GOOS=${{ matrix.GOOS }} 
+          GOARCH=${{ matrix.GOARCH }} 
+          go build -ldflags="-w -s -X main.version=${{ steps.version.outputs.version }}" -o wpex
 
       - name: Upload Release Asset
         id: upload-release-asset

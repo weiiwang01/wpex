@@ -2,23 +2,32 @@ package relay
 
 import (
 	"github.com/weiiwang01/wpex/internal/analyzer"
+	"golang.org/x/time/rate"
 	"log/slog"
 	"net"
 )
 
 type udpPacket struct {
-	addr net.UDPAddr
-	data []byte
+	addr        net.UDPAddr
+	data        []byte
+	source      net.UDPAddr
+	isBroadcast bool
 }
 
 type Relay struct {
 	send     chan udpPacket
 	analyzer analyzer.WireguardAnalyzer
 	conn     *net.UDPConn
+	limit    *rate.Limiter
 }
 
 func (r *Relay) sendUDP() {
 	for packet := range r.send {
+		if packet.isBroadcast {
+			if !r.limit.Allow() {
+				slog.Error("broadcast rate limit exceeded", "src", packet.source.String(), "dst", packet.addr.String())
+			}
+		}
 		_, err := r.conn.WriteToUDP(packet.data, &packet.addr)
 		if err != nil {
 			slog.Error("error while sending UDP packet", "error", err.Error(), "addr", packet.addr.String())
@@ -35,22 +44,20 @@ func (r *Relay) receiveUDP() {
 			continue
 		}
 		packet := buf[:n]
-		peers, err := r.analyzer.Analyse(packet, *remoteAddr)
-		if err != nil {
-			continue
-		}
+		peers, send := r.analyzer.Analyse(packet, *remoteAddr)
 		for _, peer := range peers {
-			r.send <- udpPacket{addr: peer, data: packet}
+			r.send <- udpPacket{addr: peer, data: send, source: *remoteAddr, isBroadcast: len(peers) > 1}
 		}
 	}
 }
 
 // Start starts the wireguard packet relay server.
-func Start(conn *net.UDPConn, publicKeys [][]byte) {
+func Start(conn *net.UDPConn, publicKeys [][]byte, peers, pairs int) {
 	relay := Relay{
 		send:     make(chan udpPacket),
 		analyzer: analyzer.MakeWireguardAnalyzer(publicKeys),
 		conn:     conn,
+		limit:    rate.NewLimiter(rate.Limit(pairs*2*peers)/5, 5),
 	}
 	for i := 0; i < 4; i++ {
 		go relay.sendUDP()

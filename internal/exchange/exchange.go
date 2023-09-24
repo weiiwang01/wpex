@@ -113,7 +113,7 @@ func (t *ExchangeTable) LinkPeers(sender, receiver uint32) error {
 		return fmt.Errorf("failed to link peers: unknown receiver %d", receiver)
 	}
 
-	ttl := time.Now().Add(time.Duration(4) * time.Minute)
+	ttl := time.Now().Add(time.Duration(3) * time.Minute)
 
 	s.established = true
 	s.counterpart = receiver
@@ -139,6 +139,20 @@ func (t *ExchangeTable) GetPeerCounterpart(index uint32) (uint32, error) {
 	}
 
 	return peer.counterpart, nil
+}
+
+// Contains checks if an address exists in the exchange table.
+func (t *ExchangeTable) Contains(addr net.UDPAddr) bool {
+	t.lock.RLock()
+	defer t.lock.RUnlock()
+
+	for _, peer := range t.table {
+		if peer.addr.String() == addr.String() {
+			return true
+		}
+	}
+
+	return false
 }
 
 func MakeExchangeTable() ExchangeTable {
