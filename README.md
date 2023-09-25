@@ -5,7 +5,7 @@ without compromising the end-to-end encryption of WireGuard.
 
 ## Features
 
-- The relay server **can't** tamper the encryption.
+- The relay server **can't** tamper the encryption by any means.
 - Works with vanilla WireGuard setups, no extra software required.
 - Zero MTU overhead.
 
@@ -16,13 +16,11 @@ without compromising the end-to-end encryption of WireGuard.
 Fetch and run the `wpex` Docker image with:
 
 ```bash
-docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest --peers 3 --pairs 2
+docker run -d -p 40000:40000/udp ghcr.io/weiiwang01/wpex:latest --broadcast-rate 3
 ```
 
-Where `--peers` is the number of WireGuard peers connecting to the server,
-and `--pairs` is the number of WireGuard peer-to-peer pairs formed from all
-pairs. Those configurations are used to estimate broadcast rate limit for
-amplification attack mitigation.
+See [Protections](#protections-against-amplification-attacks) for more
+information on the `--broadcast-rate` flag.
 
 ### Using Pre-built Binaries:
 
@@ -73,30 +71,74 @@ PersistentKeepalive = 25
 And that's done, Peer A and Peer B should now connect, and `wpex` will
 automatically relay their traffic.
 
-## Known Limitations
+## Protections Against Amplification Attacks
 
 The design principle behind `wpex` is to know as little as possible about the
 WireGuard connections. If it knows nothing, it can't leak anything. By
 default, `wpex` is unaware of any information regarding incoming connections,
-making it vulnerable to DoS and amplification attacks.
+making it vulnerable to DoS and amplification attacks when operating in an
+untrusted network.
 
-To mitigate this, you can provide an allowed list of WireGuard public keys to
-the `wpex` server. Connections attempted with public keys not on this list will
-be ignored. This doesn't affect the integrity of the E2E encryption, as only the
-public keys (not the associated private keys) are known to the wpex server.
+The most rudimentary protection is the `--broadcast-limit`, which will limit the
+rate of amplified packets.
 
-`--peers` can be omitted as it will be set to the number of allowed public keys.
+To calculate an ideal broadcast rate limit, use the following formula: given `N`
+represents the number of WireGuard peers connecting to the server, and `K`
+denotes the number of WireGuard peer-to-peer pairs formed from all peers, the
+theoretical maximum rate of broadcast is `(N - 1) * K * 2 / 5`. Set this value
+as the broadcast rate for your `wpex` instance to ensure safe operation.
 
-Examples:
+The effectiveness of the broadcast rate limit's protection will only be realized
+if set to a sufficiently low value, for example, less than 5. This setting may
+not be viable if a larger number of peers are interconnected.
+
+In that case, for best protection, instead of a broadcast rate limit, you can
+provide an allowed list of WireGuard public keys to the `wpex` server, which
+will block any connection attempts from anyone not aware of the public keys.
+This doesn't affect the integrity of the E2E encryption, as only the public
+keys (not the associated private keys) are known to the `wpex` server.
+
+Examples of using public keys:
 
 ```bash
-docker run -d -p 40000:40000:udp ghcr.io/weiiwang01/wpex:latest --pairs 1 \
+docker run -d -p 40000:40000/udp ghcr.io/weiiwang01/wpex:latest \
   --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
   --allow BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
 ```
 
 ```bash
-wpex --pairs 1 \
-  --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
+wpex --allow AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA= \
   --allow BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB=
 ```
+
+## How `wpex` Works
+
+Within each WireGuard session, every peer in the session selects a random 32-bit
+index to identify themselves within that session. `wpex` operates by learning
+the associated endpoint address of each index, and forwarding packet based on
+the receiver index in the message.
+
+For the initial handshake message, which lacks a receiver index, `wpex`
+broadcasts the handshake initiation to all known endpoints. Only the correct
+peer will respond with a handshake response message, while the others will just
+discard the packet. This broadcasting mechanism, however, poses a significant
+vulnerability as it can be exploited for amplification attacks. Attackers can
+create fake handshake initiation messages with the source address spoofed to the
+victim's, easily causing an attack with an amplification factor of thousands.
+
+This is where public keys come to the rescue. By knowing the public keys of all
+peers, it's possible to verify the `mac1` value within the handshake initiation
+and handshake response messages. However, merely validating the `mac1` is
+inadequate since it doesn't provide resistance to replay attacks as the
+timestamp in handshake messages cannot be decrypted without the private key.
+
+To mitigate this, whenever there's a handshake initiation from new
+endpoint, `wpex` sends a pseudo cookie reply to the originating endpoint.
+A structurally valid cookie reply can be generated using only the public key.
+The new endpoint, based on WireGuard protocol, in turn, will react with a new
+handshake initiation with the correct `mac2` value, derived from the cookie
+reply sent earlier. Upon receipt of this, it's affirmed that the new endpoint is
+legitimate, and it's then added to the list of known endpoints. This mechanism
+effectively counters replay attacks as each cookie reply generated is unique.
+The `mac2` value in that handshake initiation message will be striped before
+forwarding since the cookie is generated by `wpex` and not by the actual peer.

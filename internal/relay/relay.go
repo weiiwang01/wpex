@@ -52,12 +52,12 @@ func (r *Relay) receiveUDP() {
 }
 
 // Start starts the wireguard packet relay server.
-func Start(conn *net.UDPConn, publicKeys [][]byte, peers, pairs int) {
+func Start(conn *net.UDPConn, publicKeys [][]byte, broadcastLimit *rate.Limiter) {
 	relay := Relay{
 		send:     make(chan udpPacket),
 		analyzer: analyzer.MakeWireguardAnalyzer(publicKeys),
 		conn:     conn,
-		limit:    rate.NewLimiter(rate.Limit(pairs*2*peers)/5, 5),
+		limit:    broadcastLimit,
 	}
 	for i := 0; i < 4; i++ {
 		go relay.sendUDP()
