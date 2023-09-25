@@ -34,13 +34,13 @@ func mapAddrs(as []net.UDPAddr) []string {
 func TestWireguardAnalyzer_VerifyMac1(t *testing.T) {
 	analyzer := MakeWireguardAnalyzer([][]byte{pubkeyA, pubkeyB})
 	addr1, _ := net.ResolveUDPAddr("udp", "127.0.0.1:51820")
-	addrs, _ := analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
-	if addrs == nil {
+	_, data := analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
+	if data == nil {
 		t.Error("mac1 verification failed")
 	}
 	analyzer = MakeWireguardAnalyzer([][]byte{fakePubkey})
-	addrs, _ = analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
-	if addrs != nil {
+	_, data = analyzer.Analyse(handshakeInitiationSession1AtoB, *addr1)
+	if data != nil {
 		t.Errorf("mac1 verification didn't fail")
 	}
 }

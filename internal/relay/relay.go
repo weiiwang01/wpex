@@ -25,7 +25,7 @@ func (r *Relay) sendUDP() {
 	for packet := range r.send {
 		if packet.isBroadcast {
 			if !r.limit.Allow() {
-				slog.Error("broadcast rate limit exceeded", "src", packet.source.String(), "dst", packet.addr.String())
+				slog.Warn("broadcast rate limit exceeded", "src", packet.source.String(), "dst", packet.addr.String())
 			}
 		}
 		_, err := r.conn.WriteToUDP(packet.data, &packet.addr)
