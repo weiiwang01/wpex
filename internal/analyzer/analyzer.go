@@ -1,17 +1,16 @@
 package analyzer
 
 import (
-	"context"
 	"encoding/binary"
 	"fmt"
 	"github.com/weiiwang01/wpex/internal/exchange"
+	"log"
 	"log/slog"
 	"net"
 	"time"
 )
 
 const (
-	cookieSize              = 16
 	macSize                 = 16
 	handshakeInitiationSize = 148
 	handshakeResponseSize   = 92
@@ -120,29 +119,27 @@ func (t *WireguardAnalyzer) analyseCookieReply(packet []byte, peer net.UDPAddr) 
 }
 
 func (t *WireguardAnalyzer) analyseTransportData(packet []byte, peer net.UDPAddr) ([]net.UDPAddr, []byte) {
-	logger := slog.With("addr", peer.String())
 	receiverIdx := t.decodeIndex(packet[4:8])
 	receiver, err := t.table.GetPeerAddr(receiverIdx)
-	slog.Log(context.TODO(), slog.LevelDebug-4, "transport data message received", "addr", peer.String(), "receiver", receiverIdx, "forward", receiver.String())
 	if err != nil {
-		logger.Warn(fmt.Sprintf("unknown receiver in transport data: %s", err))
+		slog.Warn(fmt.Sprintf("unknown receiver in transport data: %s", err), "addr", peer.String())
 		return nil, nil
 	}
 	sender, err := t.table.GetPeerCounterpart(receiverIdx)
 	if err != nil {
-		logger.Warn(fmt.Sprintf("unknown sender in transport data: %s", err))
+		slog.Warn(fmt.Sprintf("unknown sender in transport data: %s", err), "addr", peer.String())
 		return nil, nil
 	}
 	addr, err := t.table.GetPeerAddr(sender)
 	if err != nil {
-		logger.Warn(fmt.Sprintf("no sender address record in transport data: %s", err))
+		slog.Warn(fmt.Sprintf("no sender address record in transport data: %s", err), "addr", peer.String())
 		return nil, nil
 	}
-	if addr.String() != peer.String() {
+	if !addrEqual(addr, peer) {
 		slog.Debug("roaming detected in transport data message", "sender", sender, "before", addr.String(), "after", peer.String())
 		err := t.table.UpdatePeerAddr(sender, peer)
 		if err != nil {
-			logger.Warn(fmt.Sprintf("failed to update sender address: %s", err))
+			slog.Warn(fmt.Sprintf("failed to update sender address: %s", err), "addr", peer.String())
 			return nil, nil
 		}
 	}
@@ -151,7 +148,6 @@ func (t *WireguardAnalyzer) analyseTransportData(packet []byte, peer net.UDPAddr
 
 // Analyse updates the exchange table with the source address and returns the forwarding address for this packet.
 func (t *WireguardAnalyzer) Analyse(packet []byte, peer net.UDPAddr) ([]net.UDPAddr, []byte) {
-	logger := slog.With("addr", peer.String())
 	const (
 		handshakeInitiationType = iota + 1
 		handshakeResponseType
@@ -159,7 +155,7 @@ func (t *WireguardAnalyzer) Analyse(packet []byte, peer net.UDPAddr) ([]net.UDPA
 		transportDataType
 	)
 	if len(packet) < 16 {
-		logger.Error("invalid wireguard message: too short")
+		slog.Error("invalid wireguard message: too short", "addr", peer.String())
 		return nil, nil
 	}
 	msgType := int(binary.LittleEndian.Uint32(packet[:4]))
@@ -173,7 +169,7 @@ func (t *WireguardAnalyzer) Analyse(packet []byte, peer net.UDPAddr) ([]net.UDPA
 	case transportDataType:
 		return t.analyseTransportData(packet, peer)
 	default:
-		logger.Error("unknown message type")
+		slog.Error("unknown message type", "addr", peer.String())
 		return nil, nil
 	}
 }
@@ -181,7 +177,7 @@ func (t *WireguardAnalyzer) Analyse(packet []byte, peer net.UDPAddr) ([]net.UDPA
 func MakeWireguardAnalyzer(pubkeys [][]byte) WireguardAnalyzer {
 	secret, err := token(32)
 	if err != nil {
-		panic(fmt.Errorf("failed to generate cookie secret: %w", err))
+		log.Fatal(fmt.Errorf("failed to generate cookie secret: %w", err))
 	}
 	return WireguardAnalyzer{
 		table: exchange.MakeExchangeTable(),

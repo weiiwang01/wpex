@@ -1,9 +1,11 @@
 package analyzer
 
 import (
+	"bytes"
 	"crypto/rand"
 	"golang.org/x/crypto/blake2s"
 	"golang.org/x/crypto/chacha20poly1305"
+	"net"
 )
 
 func hash(dst []byte, data ...[]byte) [32]byte {
@@ -42,4 +44,8 @@ func token(n int) ([]byte, error) {
 		return nil, err
 	}
 	return b, nil
+}
+
+func addrEqual(a1, a2 net.UDPAddr) bool {
+	return a1.Port == a2.Port && bytes.Equal(a1.IP, a2.IP) && a1.Zone == a2.Zone
 }

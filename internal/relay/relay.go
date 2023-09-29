@@ -1,44 +1,34 @@
 package relay
 
 import (
+	"context"
+	"fmt"
 	"github.com/weiiwang01/wpex/internal/analyzer"
 	"golang.org/x/time/rate"
+	"log"
 	"log/slog"
 	"net"
+	"runtime"
+	"syscall"
 )
 
 type udpPacket struct {
-	addr        net.UDPAddr
+	addr        net.Addr
 	data        []byte
-	source      net.UDPAddr
+	source      net.Addr
 	isBroadcast bool
 }
 
 type Relay struct {
 	send     chan udpPacket
 	analyzer analyzer.WireguardAnalyzer
-	conn     *net.UDPConn
 	limit    *rate.Limiter
 }
 
-func (r *Relay) sendUDP() {
-	for packet := range r.send {
-		if packet.isBroadcast {
-			if !r.limit.Allow() {
-				slog.Warn("broadcast rate limit exceeded", "src", packet.source.String(), "dst", packet.addr.String())
-			}
-		}
-		_, err := r.conn.WriteToUDP(packet.data, &packet.addr)
-		if err != nil {
-			slog.Error("error while sending UDP packet", "error", err.Error(), "addr", packet.addr.String())
-		}
-	}
-}
-
-func (r *Relay) receiveUDP() {
+func (r *Relay) relay(conn *net.UDPConn) {
+	buf := make([]byte, 65536)
 	for {
-		buf := make([]byte, 1500)
-		n, remoteAddr, err := r.conn.ReadFromUDP(buf)
+		n, remoteAddr, err := conn.ReadFromUDP(buf)
 		if err != nil {
 			slog.Error("error while receiving UDP packet", "error", err.Error(), "addr", remoteAddr)
 			continue
@@ -46,22 +36,44 @@ func (r *Relay) receiveUDP() {
 		packet := buf[:n]
 		peers, send := r.analyzer.Analyse(packet, *remoteAddr)
 		for _, peer := range peers {
-			r.send <- udpPacket{addr: peer, data: send, source: *remoteAddr, isBroadcast: len(peers) > 1}
+			if len(peers) > 1 {
+				if !r.limit.Allow() {
+					slog.Warn("broadcast rate limit exceeded", "src", remoteAddr.String(), "dst", peer.String())
+					continue
+				}
+			}
+			_, err := conn.WriteToUDP(send, &peer)
+			if err != nil {
+				slog.Error("error while sending UDP packet", "error", err.Error(), "addr", peer.String())
+			}
 		}
 	}
 }
 
 // Start starts the wireguard packet relay server.
-func Start(conn *net.UDPConn, publicKeys [][]byte, broadcastLimit *rate.Limiter) {
+func Start(address string, publicKeys [][]byte, broadcastLimit *rate.Limiter) {
+	slog.Info("server listening", "addr", address)
+	var lc = net.ListenConfig{
+		Control: func(network, address string, c syscall.RawConn) error {
+			var opErr error
+			if err := c.Control(func(fd uintptr) { opErr = control(fd) }); err != nil {
+				return err
+			}
+			return opErr
+		},
+	}
 	relay := Relay{
 		send:     make(chan udpPacket),
 		analyzer: analyzer.MakeWireguardAnalyzer(publicKeys),
-		conn:     conn,
 		limit:    broadcastLimit,
 	}
-	for i := 0; i < 4; i++ {
-		go relay.sendUDP()
-		go relay.receiveUDP()
+	for i := 0; i < runtime.NumCPU(); i++ {
+		l, err := lc.ListenPacket(context.Background(), "udp", address)
+		if err != nil {
+			log.Fatal(fmt.Sprintf("failed to listen on %s: %s", address, err))
+		}
+		conn := l.(*net.UDPConn)
+		go relay.relay(conn)
 	}
 	select {}
 }

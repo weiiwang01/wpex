@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"github.com/weiiwang01/wpex/internal/relay"
 	"golang.org/x/time/rate"
+	"log"
 	"log/slog"
-	"net"
 	"os"
 	"strings"
 )
@@ -29,7 +29,6 @@ func main() {
 	bind := flag.String("bind", "", "address to bind to")
 	port := flag.Uint("port", 40000, "port number to listen")
 	debug := flag.Bool("debug", false, "enable debug messages")
-	trace := flag.Bool("trace", false, "enable trace level debug messages")
 	broadcastRate := flag.Uint("broadcast-rate", 0, "broadcast rate limit in packet per second")
 	versionFlag := flag.Bool("version", false, "show version number and quit")
 	var allows pubKeys
@@ -44,29 +43,17 @@ func main() {
 	if *debug {
 		loggingLevel.Set(slog.LevelDebug)
 	}
-	if *trace {
-		loggingLevel.Set(slog.LevelDebug - 4)
-	}
 	slog.SetDefault(logger)
 	address := fmt.Sprintf("%s:%d", *bind, *port)
 	var allowKeys [][]byte
 	for _, allow := range allows {
 		k, err := base64.StdEncoding.DecodeString(allow)
 		if err != nil || len(k) != 32 {
-			panic(fmt.Sprintf("invalid wireguard public key: '%s'", allow))
+			log.Fatal(fmt.Sprintf("invalid wireguard public key: '%s'", allow))
 		}
 		logger.Debug("allow wireguard public key", "key", allow)
 		allowKeys = append(allowKeys, k)
 	}
-	addr, err := net.ResolveUDPAddr("udp", address)
-	if err != nil {
-		panic(fmt.Sprintf("failed to resolve UDP address: %s", err))
-	}
-	conn, err := net.ListenUDP("udp", addr)
-	if err != nil {
-		panic(fmt.Sprintf("failed to listen on UDP: %s", err))
-	}
-	logger.Info("server listening", "addr", address)
 	limit := rate.Limit(*broadcastRate)
 	if *broadcastRate == 0 {
 		slog.Debug("broadcast rate limit is set to +Inf")
@@ -74,5 +61,5 @@ func main() {
 	} else {
 		slog.Debug(fmt.Sprintf("broadcast rate limit is set to %d", *broadcastRate))
 	}
-	relay.Start(conn, allowKeys, rate.NewLimiter(limit, int((*broadcastRate)*5)))
+	relay.Start(address, allowKeys, rate.NewLimiter(limit, int((*broadcastRate)*5)))
 }
