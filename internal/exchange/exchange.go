@@ -8,133 +8,197 @@ import (
 	"time"
 )
 
+const (
+	endpointTTL  = 1 * time.Minute
+	handshakeTTL = 5 * time.Second
+	sessionTTL   = 3 * time.Minute
+)
+
+type endpointInfo struct {
+	refs      int
+	addr      net.UDPAddr
+	expiredAt time.Time
+}
+
+func (e *endpointInfo) isExpired() bool {
+	if e.refs <= 0 && e.expiredAt.Before(time.Now()) {
+		return true
+	}
+	return false
+}
+
 type peerInfo struct {
-	addr        net.UDPAddr
-	ttl         time.Time
+	index       uint32
+	addr        *endpointInfo
 	established bool
 	counterpart uint32
+	expiredAt   time.Time
+}
+
+func (p *peerInfo) isExpired() bool {
+	return p.isExpiredAt(time.Now())
+}
+
+func (p *peerInfo) isExpiredAt(t time.Time) bool {
+	if p.expiredAt.Before(t) {
+		return true
+	}
+	return false
 }
 
 // ExchangeTable is a concurrency-safe table that maintains wireguard peer information.
 type ExchangeTable struct {
-	table map[uint32]peerInfo
-	lock  sync.RWMutex
+	mu        sync.RWMutex
+	endpoints map[string]*endpointInfo
+	peers     map[uint32]peerInfo
 }
 
-// AddPeerAddr adds a new peer's endpoint address to the exchange table
-// and automatically removes expired peer information.
-func (t *ExchangeTable) AddPeerAddr(index uint32, addr net.UDPAddr) error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+func (t *ExchangeTable) refEndpoint(addr net.UDPAddr) *endpointInfo {
+	addrStr := addr.String()
+	e, ok := t.endpoints[addrStr]
+	if ok {
+		e.refs += 1
+		return e
+	}
+	e = &endpointInfo{
+		addr: addr,
+		refs: 1,
+	}
+	t.endpoints[addrStr] = e
+	return e
+}
 
+func (t *ExchangeTable) derefEndpoint(endpoint *endpointInfo) {
+	endpoint.refs -= 1
+	if endpoint.refs <= 0 {
+		endpoint.expiredAt = time.Now().Add(endpointTTL)
+	}
+}
+
+func (t *ExchangeTable) cleanup() {
 	now := time.Now()
-	for index, peer := range t.table {
-		if now.After(peer.ttl) {
+	for index, peer := range t.peers {
+		if peer.isExpiredAt(now) {
 			slog.Debug("remove expired peer information", "index", index)
-			delete(t.table, index)
+			t.derefEndpoint(peer.addr)
+			delete(t.peers, index)
 		}
 	}
+	for addr, endpoint := range t.endpoints {
+		if endpoint.isExpired() {
+			slog.Debug("remove expired endpoint information", "addr", addr)
+			delete(t.endpoints, addr)
+		}
+	}
+}
 
-	if _, ok := t.table[index]; ok {
+// AddPeerAddr adds a new peer's endpoint address to the exchange table.
+func (t *ExchangeTable) AddPeerAddr(index uint32, addr net.UDPAddr) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+
+	t.cleanup()
+	if _, ok := t.peers[index]; ok {
 		return fmt.Errorf("peer index collision detected on %d", index)
 	}
-
-	t.table[index] = peerInfo{
-		addr: addr,
-		ttl:  time.Now().Add(10 * time.Second),
+	t.peers[index] = peerInfo{
+		index:       index,
+		addr:        t.refEndpoint(addr),
+		established: false,
+		counterpart: 0,
+		expiredAt:   time.Now().Add(handshakeTTL),
 	}
-
-	slog.Debug("exchange table updated", "entries", len(t.table))
 	return nil
 }
 
 // UpdatePeerAddr updates the endpoint address of a peer given its index.
 func (t *ExchangeTable) UpdatePeerAddr(index uint32, addr net.UDPAddr) error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-	peer, ok := t.table[index]
+	t.cleanup()
+	peer, ok := t.peers[index]
 	if !ok {
-		return fmt.Errorf("failed to update: unknown peer %d", index)
+		return fmt.Errorf("failed to update: peer %d not found", index)
 	}
-
-	peer.addr = addr
-	t.table[index] = peer
+	t.derefEndpoint(peer.addr)
+	peer.addr = t.refEndpoint(addr)
+	t.peers[index] = peer
 	return nil
 }
 
 // GetPeerAddr retrieves the endpoint address of a peer using its index.
 func (t *ExchangeTable) GetPeerAddr(index uint32) (net.UDPAddr, error) {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
-	peer, ok := t.table[index]
-	if !ok {
-		return net.UDPAddr{}, fmt.Errorf("unknown peer %d", index)
+	peer, ok := t.peers[index]
+	if !ok || peer.isExpired() {
+		return net.UDPAddr{}, fmt.Errorf("peer %d not found", index)
 	}
-
-	return peer.addr, nil
+	return peer.addr.addr, nil
 }
 
 // ListAddrs returns all known endpoint addresses from the exchange table.
 func (t *ExchangeTable) ListAddrs(exclude net.UDPAddr) []net.UDPAddr {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
 	var addrs []net.UDPAddr
-	excludes := map[string]struct{}{
-		exclude.String(): {},
-	}
-
-	for _, peer := range t.table {
-		addrStr := peer.addr.String()
-		if _, ok := excludes[addrStr]; !ok {
-			addrs = append(addrs, peer.addr)
-			excludes[addrStr] = struct{}{}
+	for _, endpoint := range t.endpoints {
+		if !endpoint.isExpired() && endpoint.addr.String() != exclude.String() {
+			addrs = append(addrs, endpoint.addr)
 		}
 	}
-
 	return addrs
 }
 
-// LinkPeers associates two peers in the same wireguard session.
+// AssociatePeers associates two peers in the same wireguard session.
 // After linking, the counterpart peer can be retrieved using GetPeerCounterpart.
-func (t *ExchangeTable) LinkPeers(sender, receiver uint32) error {
-	t.lock.Lock()
-	defer t.lock.Unlock()
+func (t *ExchangeTable) AssociatePeers(sender, receiver uint32) error {
+	t.mu.Lock()
+	defer t.mu.Unlock()
 
-	s, ok := t.table[sender]
+	t.cleanup()
+	s, ok := t.peers[sender]
 	if !ok {
-		return fmt.Errorf("failed to link peers: unknown sender %d", sender)
+		return fmt.Errorf("failed to associate peers: sender %d not found", sender)
 	}
 
-	r, ok := t.table[receiver]
+	r, ok := t.peers[receiver]
 	if !ok {
-		return fmt.Errorf("failed to link peers: unknown receiver %d", receiver)
+		return fmt.Errorf("failed to associate peers: receiver %d not found", receiver)
 	}
 
-	ttl := time.Now().Add(time.Duration(3) * time.Minute)
+	if s.established && r.established && s.counterpart == receiver && r.counterpart == sender {
+		return nil
+	}
 
+	if s.established || r.established {
+		return fmt.Errorf("sender or receiver has already been assoicated with another peer")
+	}
+
+	expiredAt := time.Now().Add(sessionTTL)
 	s.established = true
 	s.counterpart = receiver
-	s.ttl = ttl
-	t.table[sender] = s
+	s.expiredAt = expiredAt
+	t.peers[sender] = s
 
 	r.established = true
 	r.counterpart = sender
-	r.ttl = ttl
-	t.table[receiver] = r
+	r.expiredAt = expiredAt
+	t.peers[receiver] = r
 
 	return nil
 }
 
 // GetPeerCounterpart retrieves the counterpart of a given peer from the same session.
 func (t *ExchangeTable) GetPeerCounterpart(index uint32) (uint32, error) {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
-	peer, ok := t.table[index]
-	if !ok || !peer.established {
+	peer, ok := t.peers[index]
+	if !ok || !peer.established || peer.isExpired() {
 		return 0, fmt.Errorf("peer %d doesn't exist or has no counterpart", index)
 	}
 
@@ -143,20 +207,19 @@ func (t *ExchangeTable) GetPeerCounterpart(index uint32) (uint32, error) {
 
 // Contains checks if an address exists in the exchange table.
 func (t *ExchangeTable) Contains(addr net.UDPAddr) bool {
-	t.lock.RLock()
-	defer t.lock.RUnlock()
+	t.mu.RLock()
+	defer t.mu.RUnlock()
 
-	for _, peer := range t.table {
-		if peer.addr.String() == addr.String() {
-			return true
-		}
+	endpoint, ok := t.endpoints[addr.String()]
+	if !ok || endpoint.isExpired() {
+		return false
 	}
-
-	return false
+	return true
 }
 
 func MakeExchangeTable() ExchangeTable {
 	return ExchangeTable{
-		table: make(map[uint32]peerInfo),
+		endpoints: make(map[string]*endpointInfo),
+		peers:     make(map[uint32]peerInfo),
 	}
 }

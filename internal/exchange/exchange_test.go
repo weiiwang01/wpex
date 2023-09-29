@@ -15,17 +15,17 @@ func TestExchangeTable_AddPeerAddr(t *testing.T) {
 	if err := table.AddPeerAddr(index, *addr); err != nil {
 		t.Errorf("AddPeerAddr failed: %v", err)
 	}
-	if len(table.table) != 1 {
-		t.Errorf("incorrect number of peers in table, expected 1, got %d", len(table.table))
+	if len(table.peers) != 1 {
+		t.Errorf("incorrect number of peers in table, expected 1, got %d", len(table.peers))
 	}
-	peer := table.table[index]
-	if peer.addr.String() != addr.String() {
-		t.Errorf("incorrect address of peer, expected %s, got %s", addr.String(), peer.addr.String())
+	peer := table.peers[index]
+	if peer.addr.addr.String() != addr.String() {
+		t.Errorf("incorrect address of peer, expected %s, got %s", addr.String(), peer.addr.addr.String())
 	}
 	if err := table.AddPeerAddr(1, *addr); err == nil {
 		t.Errorf("AddPeerAddr didn't return error when adding an existing peer")
 	}
-	if !peer.ttl.After(now) {
+	if !peer.expiredAt.After(now) {
 		t.Errorf("incorrect ttl of peer")
 	}
 }
@@ -67,8 +67,8 @@ func TestExchangeTable_GetPeerCounterpart(t *testing.T) {
 	if err := table.AddPeerAddr(index3, *addr3); err != nil {
 		t.Errorf("AddPeerAddr failed: %v", err)
 	}
-	if err := table.LinkPeers(index1, index2); err != nil {
-		t.Errorf("LinkPeers failed: %v", err)
+	if err := table.AssociatePeers(index1, index2); err != nil {
+		t.Errorf("AssociatePeers failed: %v", err)
 	}
 	c1, err := table.GetPeerCounterpart(index1)
 	if err != nil {
@@ -98,15 +98,15 @@ func TestExchangeTable_LinkPeers(t *testing.T) {
 	if err := table.AddPeerAddr(index2, *addr2); err != nil {
 		t.Errorf("AddPeerAddr failed: %v", err)
 	}
-	if err := table.LinkPeers(index1, index2); err != nil {
-		t.Errorf("LinkPeers failed: %v", err)
+	if err := table.AssociatePeers(index1, index2); err != nil {
+		t.Errorf("AssociatePeers failed: %v", err)
 	}
-	peer1, ok1 := table.table[index1]
-	peer2, ok2 := table.table[index2]
+	peer1, ok1 := table.peers[index1]
+	peer2, ok2 := table.peers[index2]
 	if !ok1 || !ok2 {
 		t.Errorf("AddPeerAddr failed, peer doesn't exist in the table")
 	}
-	if peer1.ttl != peer2.ttl {
+	if peer1.expiredAt != peer2.expiredAt {
 		t.Errorf("linked peers don't have same ttl")
 	}
 	if !peer1.established || !peer2.established {
