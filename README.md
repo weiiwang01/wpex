@@ -6,8 +6,34 @@ without compromising the end-to-end encryption of WireGuard.
 ## Features
 
 - The relay server **can't** tamper the encryption by any means.
-- Works with vanilla WireGuard setups, no extra software required.
+- Works transparently with vanilla WireGuard setups, no extra software required.
 - Zero MTU overhead.
+
+## Why `wpex`
+
+Commonly, there are three approaches for WireGuard NAT traversal relay. The
+first is using a traditional NAT traversal relay, like `TURN` or `DERP`
+protocol. However, the downside to this method is that it requires you to
+install a `TURN` or `DERP` client on your WireGuard peers, which might be
+impossible or undesirable for some.
+
+The second solution is hub-and-spoke style IP forwarding, where the cloud server
+is also a WireGuard peer. In this setup, packets are decrypted and forwarded on
+the cloud, which, unfortunately, exposes unencrypted data in the cloud server.
+
+The third solution is tunneling, wherein a tunnel is established between the
+WireGuard peer and the cloud server to transmit encrypted WireGuard packets. The
+caveat here is that, like all tunnels, there are MTU overheads. And you have to
+be cautious about the isolation between the tunnel network and the WireGuard
+network.
+
+`wpex` is engineered to overcome all these issues. It doesn't require any
+software or agent installation on the WireGuard peer side, making it compatible
+with any device running WireGuard. Moreover, `wpex` is designed in such a way
+that it's not possible to decrypt nor tamper with the encryption of WireGuard,
+ensuring the integrity of end-to-end encryption. And, with `wpex`, there are no
+MTU overheads. You can read [How `wpex` Works](#how-wpex-works) to learn about
+the magic behind `wpex`.
 
 ## Installation
 
